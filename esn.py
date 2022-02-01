@@ -57,11 +57,13 @@ class esn:
         return x, y
 
 
-    def simulate(self, input, target=None):
+    def simulate(self, n_steps, n_samples, input=None, target=None):
         '''
         Simulate n_steps of ESN dynamics.
 
         Args:
+            - n_steps: Number of timesteps to simulate
+            - n_samples: Number of time series samples 
             - input: Tensor / numpy array of inputs (n_samples, n_inputs, n_timesteps)
             - target: (Optional) Tensor / numpy array of target signal (n_samples, n_outputs, n_timesteps)
 
@@ -71,18 +73,25 @@ class esn:
         scl_x_init = 10 # Divides normal rand var that inits x
         
         # Convert non-torch-tensor input
-        if not torch.is_tensor(input):
+        if (input is not None) & (not torch.is_tensor(input)):
             input = torch.tensor(input, dtype=torch.float, device=self.device)
+            input = torch.cat((torch.ones(size=(n_samples, 1, n_steps), device=self.device), input), dim=1) # Concat input bias
 
-        # Infer # timesteps & # samples from input
-        n_steps = input.size(dim=-1)
-        n_samples = input.size(dim=0)
+            # Check input dimensions
+            if (n_steps != input.size(dim=-1)) | (n_samples != input.size(dim=0)):
+                raise Exception("n_steps or n_samples does not match input dimensions")
         
         # Convert non-torch-tensor target
         if (target is not None) & (not torch.is_tensor(target)):
             target = torch.tensor(target, dtype=torch.float, device=self.device)
 
-        input = torch.cat((torch.ones(size=(n_samples, 1, n_steps), device=self.device), input), dim=1) # Concat input bias
+            # Check target dimensions
+            if (n_steps != target.size(dim=-1)) | (n_samples != target.size(dim=0)):
+                raise Exception("n_steps or n_samples does not match target dimensions")
+
+        # If no input passed, make zero tensor for _one_step
+        if input is None:
+            input = torch.zeros(size=(n_samples, self.n_inputs, self.n_timesteps))
 
         # Initialize state and output
         x_prev = torch.tanh(torch.randn(size=(n_samples, self.n_hidden), device=self.device) / scl_x_init)
@@ -110,11 +119,20 @@ class esn:
         return states, outputs
 
 
-    def fit(self, input, target):
+    def fit(self, target, input=None):
+        # Check whether target is tensor
         if not torch.is_tensor(target):
             target = torch.tensor(target, dtype=torch.float, device=self.device)
 
-        states, _ = self.simulate(input, target=target) # Simulate
+        # Infer timesteps and samples
+        n_steps = target.size(dim=-1)
+        n_samples = target.size(dim=0)
+
+        states, _ = self.simulate(n_steps, n_samples, input=input, target=target) # Simulate
+
+        # Slice off the beginning
+        states = states[:,:,1000:]
+        target = target[:,:,1000:]
 
         # Flatten 3D tensors into matrices
         target = target.transpose(0, 1).reshape(self.n_outputs, -1)
