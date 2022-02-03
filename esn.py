@@ -21,7 +21,9 @@ class esn:
 
 
     def init_weights(self):
-        
+        '''
+        Initialize weights.
+        '''
         # Adjacency matrix
         self.w = torch.rand(size=(self.n_hidden, self.n_hidden), device=self.device) * 2 - 1
         zero_out_mask = torch.rand(size=(self.n_hidden, self.n_hidden), device=self.device) < self.pcon
@@ -57,25 +59,28 @@ class esn:
         return x, y
 
 
-    def simulate(self, n_steps, n_samples, input=None, target=None):
+    def simulate(self, n_steps, n_samples, input=None, target=None, extend=None):
         '''
-        Simulate n_steps of ESN dynamics.
+        Simulate n_steps of ESN dynamics. Can optionally give input, target. If given, 
+        target is provided as feedback. If extend provided, output feedback replaces 
+        target feedback after end of target trace.
 
         Args:
             - n_steps: Number of timesteps to simulate
             - n_samples: Number of time series samples 
-            - input: Tensor / numpy array of inputs (n_samples, n_inputs, n_timesteps)
+            - input: (Optional) Tensor / numpy array of inputs (n_samples, n_inputs, n_timesteps)
             - target: (Optional) Tensor / numpy array of target signal (n_samples, n_outputs, n_timesteps)
+            - extend: (Optional) Number of timesteps to extend beyond teacher forcing
 
         Returns:
-            - Tensors of states & outputs
+            - States [n_samples, n_hidden, n_steps]
+            - Outputs [n_samples, n_ouputs, n_steps]
         '''
         scl_x_init = 10 # Divides normal rand var that inits x
         
         # Convert non-torch-tensor input
         if (input is not None) & (not torch.is_tensor(input)):
             input = torch.tensor(input, dtype=torch.float, device=self.device)
-            input = torch.cat((torch.ones(size=(n_samples, 1, n_steps), device=self.device), input), dim=1) # Concat input bias
 
             # Check input dimensions
             if (n_steps != input.size(dim=-1)) | (n_samples != input.size(dim=0)):
@@ -85,13 +90,15 @@ class esn:
         if (target is not None) & (not torch.is_tensor(target)):
             target = torch.tensor(target, dtype=torch.float, device=self.device)
 
-            # Check target dimensions
-            if (n_steps != target.size(dim=-1)) | (n_samples != target.size(dim=0)):
+            # Check target dimensions. In extend mode, target need not go for full trial
+            if (extend is None) & ((n_steps != target.size(dim=-1)) | (n_samples != target.size(dim=0))):
                 raise Exception("n_steps or n_samples does not match target dimensions")
 
         # If no input passed, make zero tensor for _one_step
         if input is None:
-            input = torch.zeros(size=(n_samples, self.n_inputs, self.n_timesteps))
+            input = torch.zeros(size=(n_samples, self.n_inputs, n_steps))
+
+        input = torch.cat((torch.ones(size=(n_samples, 1, n_steps), device=self.device), input), dim=1) # Concat input bias
 
         # Initialize state and output
         x_prev = torch.tanh(torch.randn(size=(n_samples, self.n_hidden), device=self.device) / scl_x_init)
@@ -107,19 +114,38 @@ class esn:
             states[:,:,i] = x_prev
             outputs[:,:,i] = y_prev
 
-            # Integrate one step. If provided target, pass as feedback,
-            # else provide output as feedback
-            if target is None:
-                x, y = self._one_step(x_prev, input[:,:,i], y_prev, n_samples)
-            else:
-                x, y = self._one_step(x_prev, input[:,:,i], target[:,:,i], n_samples)
-            
-            x_prev, y_prev = x, y # Update variables
+            # Integrate one step
+            if i < (n_steps - 1): # Avoid indexing input beyond bounds
+                if target is None: # Drive with output only
+                    x, y = self._one_step(x_prev, input[:,:,i+1], y_prev, n_samples)
+                elif extend is not None: # Teacher force, later drive with output
+                    if i < target.shape[-1]:
+                        x, y = self._one_step(x_prev, input[:,:,i+1], target[:,:,i], n_samples)
+                    else:
+                        x, y = self._one_step(x_prev, input[:,:,i+1], y_prev, n_samples)
+                else: # Teacher force
+                    x, y = self._one_step(x_prev, input[:,:,i+1], target[:,:,i], n_samples)
+                
+                x_prev, y_prev = x, y # Update variables
 
         return states, outputs
 
 
     def fit(self, target, input=None):
+        '''
+        Does linear regression by pseudoinverse to tune output
+        weights to make output close to provided target. Calls
+        simulate to get outputs.
+
+        Args:
+            - input: (Optional) Tensor / numpy array of inputs (n_samples, n_inputs, n_timesteps)
+            - target: (Optional) Tensor / numpy array of target signal (n_samples, n_outputs, n_timesteps)
+
+        Returns:
+            - w_out_hat: Best output weight matrix from linear regression
+        '''
+        
+        
         # Check whether target is tensor
         if not torch.is_tensor(target):
             target = torch.tensor(target, dtype=torch.float, device=self.device)
@@ -151,6 +177,9 @@ class esn:
         return w_out_hat
 
     def set_w_out(self, w_out):
+        '''
+        Set output matrix of reservoir net.
+        '''
         if not torch.is_tensor(w_out):
             w_out = torch.tensor(w_out, dtype=torch.float, device=self.device)
 
