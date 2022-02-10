@@ -96,7 +96,7 @@ class esn:
 
         # If no input passed, make zero tensor for _one_step
         if input is None:
-            input = torch.zeros(size=(n_samples, self.n_inputs, n_steps))
+            input = torch.zeros(size=(n_samples, self.n_inputs, n_steps), device=self.device)
 
         input = torch.cat((torch.ones(size=(n_samples, 1, n_steps), device=self.device), input), dim=1) # Concat input bias
 
