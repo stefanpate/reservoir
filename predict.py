@@ -4,26 +4,34 @@ import torch
 import time
 import matplotlib.pyplot as plt
 
-target_fn = '/home/spate/Res/targets/lorenz_params_sig_10.00_rho_28.00_beta_2.67_n_samples_500_n_steps_4000_dt_0.01.csv'
+fcn = 'sine'
+L = 10 # Period of sine
 save_dir = '/home/spate/Res/figures/'
 n_inputs = 1
-n_hidden = 300
-n_outputs = 3
-spectral_radius = 1.2
-d = 3 # Dimensionality of system
-total_samples = 500 # Total avail system time series
+n_hidden = 100
+n_outputs = 1
+spectral_radius = 0.8
+d = 1 # Dimensionality of system
+total_samples = 100 # Total avail system time series
 total_steps = 4000 # System simulated this many time steps
 pcon = 10 / n_hidden # Each unit connected to 10 other on average
-gpu = 0 # -1 => cpu, 0 and above => gpu number
-n_steps = 3000 # Number timesteps to simulate
-leak_rate = 0.01
-n_samples = 490 # In training batch
+gpu = -1 # -1 => cpu, 0 and above => gpu number
+n_steps = total_steps # Number timesteps to train on
+leak_rate = 2 / L
+n_samples = 100 # In training batch
 teacher_steps = 2000 # Number timesteps to teacher force during test
 extend = 2000 # Timesteps to extend past teacher forcing during test
 # test_sample = np.random.randint(n_samples, total_samples) # The single target to test on multiple times
-test_sample = 498
-do_norm = True
+test_sample = 0
+do_norm = False
 do_plot = True
+
+if fcn == 'lorenz':
+    target_fn = f"/home/spate/Res/targets/lorenz_params_sig_10.00_rho_28.00_beta_2.67_n_samples_500_n_steps_{total_steps}_dt_0.01.csv"
+elif fcn == 'rossler':
+    target_fn = f"/home/spate/Res/targets/rossler_params_a_0.20_b_0.20_c_5.70_n_samples_500_n_steps_{total_steps}_dt_0.01.csv"
+elif fcn == 'sine':
+    target_fn = f"/home/spate/Res/targets/sine_period_{L}_n_steps_{400000}_dt_0.01.csv"
 
 
 res = esn(n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu) # Create reservoir
@@ -64,7 +72,8 @@ if do_plot:
 
     print(f"Test sample: {test_sample}")
     print(f"MSE TF: {np.mean(square_error[:teacher_steps]):.2f}, MSE OFB: {np.mean(square_error[teacher_steps:]):.2f}")
-    fig, ax = plt.subplots(n_outputs + 1, 1, figsize=(16, 10), sharex=True, gridspec_kw={'height_ratios':[1, 1, 1, 0.5]})
+    gs = [1] * n_outputs + [0.5]
+    fig, ax = plt.subplots(n_outputs + 1, 1, figsize=(16, 10), sharex=True, gridspec_kw={'height_ratios':gs})
     
     for i in range(n_outputs):
         ax[i].plot(t_plot * 0.01, outputs[:,i,:].T)
@@ -73,16 +82,16 @@ if do_plot:
     ax[-1].plot(t_plot * 0.01, states[:,::ds,:].reshape(-1, len(t_plot)).T)
 
     if not do_norm:
-        ax[0].set_ylim(-50, 50)
+        ax[0].set_ylim(outputs[:,0,:].min(), outputs[:,0,:].max())
     
     ax[0].set_title("Output")
     ax[-1].set_title("Select states")
     ax[-1].set_xlabel("Time")
     ax[-1].set_ylabel("Hidden unit activity")
     fig.tight_layout()
-    plt.savefig(save_dir + f"lorenz_prediction_test_sample_{test_sample}_output_target_states_n_{n_hidden}_sr_{spectral_radius}_lr_{leak_rate}.png")
+    plt.savefig(save_dir + f"{fcn}_prediction_test_sample_{test_sample}_output_target_states_n_{n_hidden}_sr_{spectral_radius}_lr_{leak_rate}.png")
     plt.show()
 
 # Save
-np.savetxt(save_dir + f"lorenz_prediction_target_test_sample_{test_sample}.csv", target_plot.reshape(n_outputs, teacher_steps + extend), delimiter=',')
-np.savetxt(save_dir + f"lorenz_prediction_outputs_test_sample_{test_sample}.csv", outputs.reshape(n_outputs, teacher_steps + extend), delimiter=',')
+np.savetxt(save_dir + f"{fcn}_prediction_target_test_sample_{test_sample}.csv", target_plot.reshape(n_outputs, teacher_steps + extend), delimiter=',')
+np.savetxt(save_dir + f"{fcn}_prediction_outputs_test_sample_{test_sample}.csv", outputs.reshape(n_outputs, teacher_steps + extend), delimiter=',')

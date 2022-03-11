@@ -30,6 +30,9 @@ class esn:
         zero_out_mask = zero_out_mask.to(dtype=torch.float)
         self.w.mul_(zero_out_mask)
         w_evals, _ = torch.eig(self.w)
+        # Eig returns nx2 array of real numbers representing real component in first column
+        # and imaginary component in second column. To get abs value, square elementwise, 
+        # sum along axis 1, and take square root. Note this is different than how numpy does complex numbers
         init_spectral_radius = (w_evals**2).sum(dim=1).sqrt_().max()
         self.w.mul_(self.spectral_radius / init_spectral_radius)
 
@@ -156,7 +159,7 @@ class esn:
 
         states, _ = self.simulate(n_steps, n_samples, input=input, target=target) # Simulate
 
-        # Slice off the beginning
+        # Throw out first 1000 timesteps
         states = states[:,:,1000:]
         target = target[:,:,1000:]
 
