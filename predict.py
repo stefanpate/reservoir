@@ -1,37 +1,48 @@
 from esn import esn
 import numpy as np
 import torch
-import time
 import matplotlib.pyplot as plt
 
+# General settings
+save_dir_fig = '/home/spate/Res/figures/'
+save_dir_data = '/cnl/data/spate/Res/'
+gpu = -1 # -1 => cpu, 0 and above => gpu number
+do_norm = True # Normalize target
+do_plot = True
+do_save = False
+
+# Data
 fcn = 'sine'
 L = 10 # Period of sine
-save_dir = '/home/spate/Res/figures/'
-n_inputs = 1
-n_hidden = 100
-n_outputs = 1
-spectral_radius = 0.8
 d = 1 # Dimensionality of system
 total_samples = 100 # Total avail system time series
 total_steps = 4000 # System simulated this many time steps
+
+# Model
+n_inputs = 1
+n_hidden = 10
+n_outputs = 1
+spectral_radius = 0.8
+leak_rate = 0.002
 pcon = 10 / n_hidden # Each unit connected to 10 other on average
-gpu = -1 # -1 => cpu, 0 and above => gpu number
+
+# Training
 n_steps = total_steps # Number timesteps to train on
-leak_rate = 2 / L
-n_samples = 100 # In training batch
+n_samples = total_samples # Size of training batch
 teacher_steps = 2000 # Number timesteps to teacher force during test
 extend = 2000 # Timesteps to extend past teacher forcing during test
 # test_sample = np.random.randint(n_samples, total_samples) # The single target to test on multiple times
 test_sample = 0
-do_norm = False
-do_plot = True
+reg_method = 'pinv' # Regression method: 'ridge', 'lasso', 'pinv'
+lam = 0 # Regression regularization param for ridge and lasso
 
+# Data file
 if fcn == 'lorenz':
-    target_fn = f"/home/spate/Res/targets/lorenz_params_sig_10.00_rho_28.00_beta_2.67_n_samples_500_n_steps_{total_steps}_dt_0.01.csv"
+    target_fn = f"/home/spate/Res/targets/lorenz_params_sig_10.00_rho_28.00_beta_2.67_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
 elif fcn == 'rossler':
-    target_fn = f"/home/spate/Res/targets/rossler_params_a_0.20_b_0.20_c_5.70_n_samples_500_n_steps_{total_steps}_dt_0.01.csv"
+    target_fn = f"/home/spate/Res/targets/rossler_params_a_0.20_b_0.20_c_5.70_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
 elif fcn == 'sine':
-    target_fn = f"/home/spate/Res/targets/sine_period_{L}_n_steps_{400000}_dt_0.01.csv"
+    target_fn = f"/home/spate/Res/targets/sine_period_{L}_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
 
 
 res = esn(n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu) # Create reservoir
@@ -50,10 +61,10 @@ if do_norm:
 train_target = target[:n_samples, :n_outputs, :n_steps].reshape(n_samples, n_outputs, n_steps) # x-coordinate of target system
 
 # Tune w_out
-w_out_hat_torch = res.fit(train_target)
-w_out_hat = w_out_hat_torch.cpu().numpy()
+# w_out_hat = res.fit(train_target, method=reg_method, lam=lam)
+w_out_hat = res.fit_rand_units(train_target, frac=0.5)
 w_out = res.w_out.cpu().numpy()
-res.set_w_out(w_out_hat_torch) # Set w_out
+res.set_w_out(w_out_hat) # Set w_out
 
 # Test
 test_target = target[test_sample, :, :teacher_steps].reshape(1, n_outputs, teacher_steps) # Slice off beyond teacher steps
@@ -89,9 +100,10 @@ if do_plot:
     ax[-1].set_xlabel("Time")
     ax[-1].set_ylabel("Hidden unit activity")
     fig.tight_layout()
-    plt.savefig(save_dir + f"{fcn}_prediction_test_sample_{test_sample}_output_target_states_n_{n_hidden}_sr_{spectral_radius}_lr_{leak_rate}.png")
+    plt.savefig(save_dir_fig + f"{fcn}_prediction_test_sample_{test_sample}_output_target_states_n_{n_hidden}_sr_{spectral_radius}_lr_{leak_rate}.png")
     plt.show()
 
 # Save
-np.savetxt(save_dir + f"{fcn}_prediction_target_test_sample_{test_sample}.csv", target_plot.reshape(n_outputs, teacher_steps + extend), delimiter=',')
-np.savetxt(save_dir + f"{fcn}_prediction_outputs_test_sample_{test_sample}.csv", outputs.reshape(n_outputs, teacher_steps + extend), delimiter=',')
+if do_save:
+    np.savetxt(save_dir_data + f"{fcn}_prediction_target_test_sample_{test_sample}.csv", target_plot.reshape(n_outputs, teacher_steps + extend), delimiter=',')
+    np.savetxt(save_dir_data + f"{fcn}_prediction_outputs_test_sample_{test_sample}.csv", outputs.reshape(n_outputs, teacher_steps + extend), delimiter=',')

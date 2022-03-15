@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from sklearn.linear_model import Ridge, Lasso
 
 class esn:
 
@@ -134,15 +135,17 @@ class esn:
         return states, outputs
 
 
-    def fit(self, target, input=None):
+    def fit(self, target, method='pinv', lam=0, input=None):
         '''
-        Does linear regression by pseudoinverse to tune output
-        weights to make output close to provided target. Calls
+        Does linear regression to tune output weights to 
+        make output close to provided target. Calls
         simulate to get outputs.
 
         Args:
+            - target: Tensor / numpy array of target signal (n_samples, n_outputs, n_timesteps)
             - input: (Optional) Tensor / numpy array of inputs (n_samples, n_inputs, n_timesteps)
-            - target: (Optional) Tensor / numpy array of target signal (n_samples, n_outputs, n_timesteps)
+            - method: Type of regression. Defaults to pseudoinverse
+            - lam: Regularization parameter for ridge and lasso regression
 
         Returns:
             - w_out_hat: Best output weight matrix from linear regression
@@ -168,14 +171,31 @@ class esn:
         states = states.transpose(0, 1).reshape(self.n_hidden, -1)
 
         st = states.size(dim=-1) # Infer n_samples * n_steps
-        states = torch.cat((torch.ones(size=(1, st), device=self.device), states), dim=0) # Concat 1s col
-        states = states.cpu().numpy() # Convert to numpy array
+        states_aug = torch.cat((torch.ones(size=(1, st), device=self.device), states), dim=0) # Concat 1s col
+        
+        # Convert to numpy array
+        states = states.cpu().numpy()
+        states_aug = states_aug.cpu().numpy()
+        target = target.cpu().numpy()
 
-        # Compute pseudoinverse
-        states_pinv = np.linalg.pinv(states)
-        states_pinv = torch.tensor(states_pinv, dtype=torch.float, device=self.device)
-
-        w_out_hat = torch.matmul(target, states_pinv)
+        # Do regression
+        if method == 'pinv':
+            states_pinv = np.linalg.pinv(states_aug)
+            w_out_hat = np.matmul(target, states_pinv)
+        elif method == 'ridge':
+            reg = Ridge(alpha=lam)
+            reg.fit(states.T, target.T) # Time x features
+            intercept = reg.intercept_.reshape(self.n_outputs, 1)
+            coeffs = reg.coef_.reshape(self.n_outputs, self.n_hidden)
+            w_out_hat = np.concatenate((intercept, coeffs), axis=1)
+            print(w_out_hat)
+        elif method == 'lasso':
+            reg = Lasso(alpha=lam)
+            reg.fit(states.T, target.T) # Time x features
+            intercept = reg.intercept_.reshape(self.n_outputs, 1)
+            coeffs = reg.coef_.reshape(self.n_outputs, self.n_hidden)
+            w_out_hat = np.concatenate((intercept, coeffs), axis=1)
+            print(w_out_hat)
 
         return w_out_hat
 
@@ -190,5 +210,54 @@ class esn:
             print("Shape mismatch w_out")
         else:
             self.w_out = w_out
+
+    def fit_rand_units(self, target, frac, input=None):
+        '''
+        '''
+
+        # Check whether target is tensor
+        if not torch.is_tensor(target):
+            target = torch.tensor(target, dtype=torch.float, device=self.device)
+
+        # Infer timesteps and samples
+        n_steps = target.size(dim=-1)
+        n_samples = target.size(dim=0)
+
+        states, _ = self.simulate(n_steps, n_samples, input=input, target=target) # Simulate
+
+        # Throw out first 1000 timesteps
+        states = states[:,:,1000:]
+        target = target[:,:,1000:]
+
+        # Flatten 3D tensors into matrices
+        target = target.transpose(0, 1).reshape(self.n_outputs, -1)
+        states = states.transpose(0, 1).reshape(self.n_hidden, -1)
+
+        # Sample random states
+        idx = np.random.rand(self.n_hidden) < frac
+        if not np.any(idx): # Ensure at least one unit chosen
+            idx = np.array([0])
+        states = states[idx, :]
+
+        st = states.size(dim=-1) # Infer n_samples * n_steps
+        states_aug = torch.cat((torch.ones(size=(1, st), device=self.device), states), dim=0) # Concat 1s col
+        states = states.cpu().numpy() # Convert to numpy array
+        
+        # Regression
+        states_pinv = np.linalg.pinv(states_aug)
+        tuned_weights = np.matmul(target, states_pinv)
+
+        # Put tuned weights back in place, 0 otherwise
+        print(idx)
+        idx = np.where(idx)[0]
+        print(idx)
+        w_out_hat = np.zeros(shape=(self.n_outputs, self.n_hidden + 1))
+        w_out_hat[:,0] = tuned_weights[:,0] # First tuned weight vector are biases
+        for i, elt in enumerate(idx):
+            w_out_hat[:, elt + 1] = tuned_weights[:, i + 1]
+
+        return w_out_hat
+
+
 
 
