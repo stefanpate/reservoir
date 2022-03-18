@@ -188,14 +188,12 @@ class esn:
             intercept = reg.intercept_.reshape(self.n_outputs, 1)
             coeffs = reg.coef_.reshape(self.n_outputs, self.n_hidden)
             w_out_hat = np.concatenate((intercept, coeffs), axis=1)
-            print(w_out_hat)
         elif method == 'lasso':
             reg = Lasso(alpha=lam)
             reg.fit(states.T, target.T) # Time x features
             intercept = reg.intercept_.reshape(self.n_outputs, 1)
             coeffs = reg.coef_.reshape(self.n_outputs, self.n_hidden)
             w_out_hat = np.concatenate((intercept, coeffs), axis=1)
-            print(w_out_hat)
 
         return w_out_hat
 
@@ -213,6 +211,8 @@ class esn:
 
     def fit_rand_units(self, target, frac, input=None):
         '''
+        Selects random sample of units and uses only a fraction
+        for linear regression.
         '''
 
         # Check whether target is tensor
@@ -233,24 +233,28 @@ class esn:
         target = target.transpose(0, 1).reshape(self.n_outputs, -1)
         states = states.transpose(0, 1).reshape(self.n_hidden, -1)
 
-        # Sample random states
+        # Sample random units
         idx = np.random.rand(self.n_hidden) < frac
-        if not np.any(idx): # Ensure at least one unit chosen
-            idx = np.array([0])
+        # Ensure at least one unit chosen
+        if not np.any(idx):
+            idx = [False] * self.n_hidden
+            idx[0] = True
+            idx = np.array(idx)
         states = states[idx, :]
 
         st = states.size(dim=-1) # Infer n_samples * n_steps
         states_aug = torch.cat((torch.ones(size=(1, st), device=self.device), states), dim=0) # Concat 1s col
-        states = states.cpu().numpy() # Convert to numpy array
+        
+        # Convert to numpy array
+        states_aug = states_aug.cpu().numpy()
+        target = target.cpu().numpy()
         
         # Regression
         states_pinv = np.linalg.pinv(states_aug)
         tuned_weights = np.matmul(target, states_pinv)
 
         # Put tuned weights back in place, 0 otherwise
-        print(idx)
         idx = np.where(idx)[0]
-        print(idx)
         w_out_hat = np.zeros(shape=(self.n_outputs, self.n_hidden + 1))
         w_out_hat[:,0] = tuned_weights[:,0] # First tuned weight vector are biases
         for i, elt in enumerate(idx):

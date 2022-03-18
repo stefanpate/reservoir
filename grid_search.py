@@ -68,4 +68,3 @@ for i, spectral_radius in enumerate(spectral_radii):
 
 mse = mse.reshape(spectral_radii.shape[0], -1)
 np.savetxt(f"/home/spate/Res/lorenz_grid_search_spectral_radius_leak_rate_hidden_units_{n_hidden}.csv", mse, delimiter=',')
-            
