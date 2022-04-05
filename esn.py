@@ -4,13 +4,14 @@ from sklearn.linear_model import Ridge, Lasso
 
 class esn:
 
-    def __init__(self, n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu):
+    def __init__(self, n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu, cluster_size=None):
         self.n_inputs = n_inputs
         self.n_hidden = n_hidden
         self.n_outputs = n_outputs
         self.spectral_radius = spectral_radius
         self.pcon = pcon
         self.leak_rate = leak_rate
+        self.cluster_size = cluster_size
 
         # Set hardware device in torch
         if gpu < 0:
@@ -18,8 +19,13 @@ class esn:
         else:
             self.device = torch.device(f"cuda:{gpu}")
 
-        self.init_weights()
+        # Get cluster indexes if averaging units
+        if self.cluster_size is not None:
+            self.get_cluster_idxs()
+        else:
+            self.n_clusters = 0
 
+        self.init_weights()
 
     def init_weights(self):
         '''
@@ -38,9 +44,37 @@ class esn:
         self.w.mul_(self.spectral_radius / init_spectral_radius)
 
         self.w_in = torch.rand(size=(self.n_hidden, self.n_inputs + 1), device=self.device) * 2 - 1 # Input
-        self.w_out = torch.rand(size=(self.n_outputs, self.n_hidden + 1), device=self.device) * 2 - 1 # Output
         self.w_fb = torch.rand(size=(self.n_hidden, self.n_outputs), device=self.device) * 2 - 1 # Output feedback
 
+        # Output matrix acts on either full state or clusters of averaged units
+        if self.cluster_size is None:
+            self.w_out = torch.rand(size=(self.n_outputs, self.n_hidden + 1), device=self.device) * 2 - 1
+        else:
+            self.w_out = torch.rand(size=(self.n_outputs, self.n_clusters + 1), device=self.device) * 2 - 1
+
+    def get_cluster_idxs(self):
+        self.n_clusters = self.n_hidden // self.cluster_size
+        self.cluster_idxs = torch.randperm(self.n_hidden, device=self.device)[:self.cluster_size * self.n_clusters]
+        self.cluster_idxs = self.cluster_idxs.reshape(self.cluster_size, self.n_clusters)
+
+    def average_states(self, x):
+        '''
+        Averages activities of units and returns n_clusters values.
+
+        Args:
+            - x: Full state (n_samples, n_hidden)
+        '''
+        dims = len(x.size())
+
+        if dims == 2:
+            x_ave = torch.empty(size=(x.size(dim=0), self.n_clusters), device=self.device)
+        elif dims == 3:
+            x_ave = torch.empty(size=(x.size(dim=0), self.n_clusters, x.size(dim=-1)), device=self.device)
+        
+        for i in range(self.n_clusters):
+            x_ave[:,i] = x.index_select(1, self.cluster_idxs[:,i]).mean(dim=1)
+        
+        return x_ave
 
     def _one_step(self, x_prev, u, fb_prev, n_samples):
         '''
@@ -58,7 +92,13 @@ class esn:
         '''
         dx = torch.tanh( u.matmul(self.w_in.t()) + x_prev.matmul(self.w.t()) + fb_prev.matmul(self.w_fb.t()) )
         x = (1 - self.leak_rate) * x_prev + self.leak_rate * dx
-        x_aug = torch.cat((torch.ones(size=(n_samples, 1), device=self.device), x), dim=1)
+
+        if self.cluster_size is not None:
+            x_ave = self.average_states(x)
+            x_aug = torch.cat((torch.ones(size=(n_samples, 1), device=self.device), x_ave), dim=1)
+        else:
+            x_aug = torch.cat((torch.ones(size=(n_samples, 1), device=self.device), x), dim=1)
+
         y = torch.matmul(x_aug, self.w_out.t())
         return x, y
 
@@ -106,7 +146,13 @@ class esn:
 
         # Initialize state and output
         x_prev = torch.tanh(torch.randn(size=(n_samples, self.n_hidden), device=self.device) / scl_x_init)
-        x_prev_aug = torch.cat((torch.ones(size=(n_samples, 1), device=self.device), x_prev), dim=1) # Concat 1s col to x
+        
+        if self.cluster_size is not None:
+            x_prev_ave = self.average_states(x_prev)
+            x_prev_aug = torch.cat((torch.ones(size=(n_samples, 1), device=self.device), x_prev_ave), dim=1) # Concat 1s col to x
+        else:
+            x_prev_aug = torch.cat((torch.ones(size=(n_samples, 1), device=self.device), x_prev), dim=1) # Concat 1s col to x
+        
         y_prev = torch.matmul(x_prev_aug,  self.w_out.t())
 
         # Init tensors to store all states and outputs over time
@@ -162,13 +208,19 @@ class esn:
 
         states, _ = self.simulate(n_steps, n_samples, input=input, target=target) # Simulate
 
+        if self.cluster_size is not None:
+            states = self.average_states(states)
+            N = self.n_clusters # Number of units after averaging
+        else:
+            N = self.n_hidden
+
         # Throw out first 1000 timesteps
         states = states[:,:,1000:]
         target = target[:,:,1000:]
 
         # Flatten 3D tensors into matrices
         target = target.transpose(0, 1).reshape(self.n_outputs, -1)
-        states = states.transpose(0, 1).reshape(self.n_hidden, -1)
+        states = states.transpose(0, 1).reshape(N, -1)
 
         st = states.size(dim=-1) # Infer n_samples * n_steps
         states_aug = torch.cat((torch.ones(size=(1, st), device=self.device), states), dim=0) # Concat 1s col
@@ -186,13 +238,13 @@ class esn:
             reg = Ridge(alpha=lam)
             reg.fit(states.T, target.T) # Time x features
             intercept = reg.intercept_.reshape(self.n_outputs, 1)
-            coeffs = reg.coef_.reshape(self.n_outputs, self.n_hidden)
+            coeffs = reg.coef_.reshape(self.n_outputs, N)
             w_out_hat = np.concatenate((intercept, coeffs), axis=1)
         elif method == 'lasso':
             reg = Lasso(alpha=lam)
             reg.fit(states.T, target.T) # Time x features
             intercept = reg.intercept_.reshape(self.n_outputs, 1)
-            coeffs = reg.coef_.reshape(self.n_outputs, self.n_hidden)
+            coeffs = reg.coef_.reshape(self.n_outputs, N)
             w_out_hat = np.concatenate((intercept, coeffs), axis=1)
 
         return w_out_hat

@@ -8,7 +8,7 @@ save_dir_fig = '/home/spate/Res/figures/'
 save_dir_data = '/cnl/data/spate/Res/'
 gpu = -1 # -1 => cpu, 0 and above => gpu number
 do_norm = True # Normalize target
-do_plot = False
+do_plot = True
 do_save = False
 
 # Data
@@ -21,11 +21,12 @@ dt = 0.01
 
 # Model
 n_inputs = d
-n_hidden = 2**7
+n_hidden = 2**8
 n_outputs = d
 spectral_radius = 1.2
 leak_rate = 0.01
 pcon = 10 / n_hidden # Each unit connected to 10 other on average
+cluster_size = 2**3
 
 # Training
 n_steps = total_steps # Number timesteps to train on
@@ -34,7 +35,7 @@ teacher_steps = 2000 # Number timesteps to teacher force during test
 extend = 2000 # Timesteps to extend past teacher forcing during test
 # test_sample = np.random.randint(n_samples, total_samples) # The single target to test on multiple times
 test_sample = 497
-reg_method = 'lasso' # Regression method: 'ridge', 'lasso', 'pinv'
+reg_method = 'pinv' # Regression method: 'ridge', 'lasso', 'pinv'
 lam = 1e-2 # Regression regularization param for ridge and lasso
 
 # Data file
@@ -46,7 +47,7 @@ elif fcn == 'sine':
     target_fn = f"/home/spate/Res/targets/sine_period_{L}_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
 
 
-res = esn(n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu) # Create reservoir
+res = esn(n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu, cluster_size=cluster_size) # Create reservoir
 
 # Get target trace
 t = np.arange(n_steps)

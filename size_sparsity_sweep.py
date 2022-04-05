@@ -4,11 +4,11 @@ import torch
 import matplotlib.pyplot as plt
 
 # General settings
-sweep = 'random_units' # Type of params to search over: 'size', 'lambda', 'random_units'
+sweep = 'average' # Type of params to search over: 'size', 'lambda', 'random_units', 'average'
 n_replicates = 20
 save_dir_fig = '/home/spate/Res/figures/'
 save_dir_data = '/cnl/data/spate/Res/'
-gpu = 1 # -1 => cpu, 0 and above => gpu number
+gpu = 0 # -1 => cpu, 0 and above => gpu number
 do_norm = True # Normalize target
 do_save = True
 
@@ -35,13 +35,14 @@ extend = 2000 # Timesteps to extend past teacher forcing during test
 test_sample = 497
 reg_method = 'pinv' # Regression method: 'ridge', 'lasso', 'pinv'
 lam = 0 # Regression regularization param for ridge and lasso
-ep = 1e-4 # Tolerance for zero weight from sparse regression
+ep = 1e-4 # Threshold under which regression coefficient is considered 0
 
 # -------------------------------------------------------------------
 # Params to search - overwrites above settings
-net_sizes = 2**np.arange(1,11)
+net_sizes = 2**np.arange(1, 11)
 lams = np.logspace(0, -5, base=10, num=6)
-fracs = 2**np.arange(1,10) / n_hidden
+fracs = 2**np.arange(1, 10) / n_hidden
+cluster_sizes = 2**np.arange(0, 10)
 # -------------------------------------------------------------------
 
 # Data file
@@ -195,6 +196,47 @@ elif sweep == 'random_units':
         
         save_last_t.append([frac, np.array(last_t_arr).mean(), np.array(last_t_arr).std()])
         save_rmse.append([frac, np.array(rmse_arr).mean(), np.array(rmse_arr).std()])
+
+elif sweep == 'average':
+    for i, cluster_size in enumerate(cluster_sizes):
+        print(f"Cluster size: {cluster_size}")
+        
+        rmse_arr = []
+        last_t_arr = []
+        for j in range(n_replicates):
+            
+            print(f"Replicate # {j}")
+            # Create new reservoir
+            pcon = 10 / n_hidden # Each unit connected to 10 other on average
+            res = esn(n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu, cluster_size=cluster_size) # Create reservoir
+
+            # Tune w_out
+            w_out_hat = res.fit(train_target, method=reg_method, lam=lam)
+            res.set_w_out(w_out_hat) # Set w_out
+
+            # Test
+            states, outputs = res.simulate(teacher_steps + extend, 1, target=test_target, extend=extend)
+            states, outputs = states.cpu().numpy(), outputs.cpu().numpy()
+
+            # Compute error
+            target_plot = target[test_sample,:,:teacher_steps + extend].reshape(1, n_outputs, teacher_steps + extend)
+            rmse = np.sqrt(np.mean(np.square(outputs - target_plot), axis=1)).reshape(-1,) 
+            rmse_truncated = rmse[1000:] # Cut off first 10 timesteps
+            
+            # Find last timestep of accurate prediction
+            error_mask = rmse[teacher_steps:] > 1
+            if np.all(error_mask): # Error above thresh at all times
+                last_t = 0
+            elif not np.any(error_mask): # Error stays below thresh
+                last_t = extend * dt
+            else:
+                last_t = (np.where(error_mask)[0][0] + 1) * dt
+            
+            rmse_arr.append(rmse_truncated.mean())
+            last_t_arr.append(last_t)
+        
+        save_last_t.append([cluster_size, np.array(last_t_arr).mean(), np.array(last_t_arr).std()])
+        save_rmse.append([cluster_size, np.array(rmse_arr).mean(), np.array(rmse_arr).std()])
 
 if do_save:
     save_last_t = np.array(save_last_t)

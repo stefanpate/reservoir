@@ -4,21 +4,21 @@ import torch
 import time
 import matplotlib.pyplot as plt
 
-target_fn = '/nadata/cnl/home/spate/Res/targets/sine_period_10_n_steps_4000_dt_0.01.csv'
+target_fn = '/home/spate/Res/targets/sine_period_10_n_samples_100_n_steps_4000_dt_0.01.csv'
 n_inputs = 1
-n_hidden = 500
+n_hidden = 2**6
 n_outputs = 1
 spectral_radius = 0.8
 pcon = 10 / n_hidden # Each unit connected to 10 other on average
 gpu = -1 # -1 => cpu, 0 and above => gpu number
 n_steps = 4000 # Number timesteps to simulate
-n_samples = 1
+n_samples = 100
 L = 10
 leak_rate = 2 / L # Found 2 * frequency of the fcn is good
-n_samples = 1 # In training batch
 d = 1
+cluster_size = 2**6
 
-res = esn(n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu) # Create reservoir
+res = esn(n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu, cluster_size=cluster_size) # Create reservoir
 
 # Get target trace
 t = np.arange(n_steps)
