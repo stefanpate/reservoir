@@ -2,6 +2,7 @@ from esn import esn
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+from helpers import data2fn
 
 # General settings
 save_dir_fig = '/home/spate/Res/figures/'
@@ -12,9 +13,9 @@ do_plot = True
 do_save = False
 
 # Data
-fcn = 'lorenz'
+fcn = 'mackey_glass' # 'lorenz', 'rossler', 'sine', 'mackey_glass'
 L = 10 # Period of sine
-d = 3 # Dimensionality of system
+d = 1 # Dimensionality of system
 total_samples = 500 # Total avail system time series
 total_steps = 4000 # System simulated this many time steps
 dt = 0.01
@@ -26,7 +27,7 @@ n_outputs = d
 spectral_radius = 1.2
 leak_rate = 0.01
 pcon = 10 / n_hidden # Each unit connected to 10 other on average
-cluster_size = 2**3
+cluster_size = None # Number of units in cluster of averaged units, or None for normal use
 
 # Training
 n_steps = total_steps # Number timesteps to train on
@@ -38,14 +39,7 @@ test_sample = 497
 reg_method = 'pinv' # Regression method: 'ridge', 'lasso', 'pinv'
 lam = 1e-2 # Regression regularization param for ridge and lasso
 
-# Data file
-if fcn == 'lorenz':
-    target_fn = f"/home/spate/Res/targets/lorenz_params_sig_10.00_rho_28.00_beta_2.67_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
-elif fcn == 'rossler':
-    target_fn = f"/home/spate/Res/targets/rossler_params_a_0.20_b_0.20_c_5.70_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
-elif fcn == 'sine':
-    target_fn = f"/home/spate/Res/targets/sine_period_{L}_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
-
+target_fn = data2fn[fcn] # Data filename from helpers.py
 
 res = esn(n_inputs, n_hidden, n_outputs, spectral_radius, pcon, leak_rate, gpu, cluster_size=cluster_size) # Create reservoir
 
@@ -89,12 +83,13 @@ else:
 
 print(f"Test sample: {test_sample}")
 print(f"RMSE Teacher Forced: {np.mean(rmse[:teacher_steps]):.2f}, RMSE Output Feedback: {np.mean(rmse[teacher_steps:]):.2f}")
-print("Predicts up to time: ", last_t)
+print(f"Predicts {last_t} time units beyond teacher forcing.")
 print(f"{(w_out_hat[np.abs(w_out_hat) > 1e-4].size / w_out_hat.size) * 100:.2f}% of Wout used")
 
 # Plot after tuning w_out
 if do_plot:
     ds = 30 # Downsample hidden units to plot
+    margin = 0.1 # Percentage of max / min for ylims
     var_names = ["x", "y", "z"]
     t_plot = np.arange(0, teacher_steps + extend)
     
@@ -107,9 +102,9 @@ if do_plot:
         ax[i].set_ylabel(var_names[i])
     ax[-1].plot(t_plot * dt, states[:,::ds,:].reshape(-1, len(t_plot)).T)
 
-    if not do_norm:
-        ax[0].set_ylim(outputs[:,0,:].min(), outputs[:,0,:].max())
     
+    # ax[0].set_ylim(outputs[:,0,:].min() * (1 - margin), outputs[:,0,:].max() * (1 + margin))
+    ax[0].set_ylim(target_plot[0,i,:].min() * (1 - margin), target_plot[0,i,:].max() * (1 + margin))
     ax[0].set_title("Output")
     ax[-1].set_title("Select states")
     ax[-1].set_xlabel("Time")

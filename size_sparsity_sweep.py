@@ -2,6 +2,7 @@ from esn import esn
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+from helpers import data2fn
 
 # General settings
 sweep = 'average' # Type of params to search over: 'size', 'lambda', 'random_units', 'average'
@@ -45,13 +46,7 @@ fracs = 2**np.arange(1, 10) / n_hidden
 cluster_sizes = 2**np.arange(0, 10)
 # -------------------------------------------------------------------
 
-# Data file
-if fcn == 'lorenz':
-    target_fn = f"/home/spate/Res/targets/lorenz_params_sig_10.00_rho_28.00_beta_2.67_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
-elif fcn == 'rossler':
-    target_fn = f"/home/spate/Res/targets/rossler_params_a_0.20_b_0.20_c_5.70_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
-elif fcn == 'sine':
-    target_fn = f"/home/spate/Res/targets/sine_period_{L}_n_samples_{total_samples}_n_steps_{total_steps}_dt_0.01.csv"
+target_fn = data2fn[fcn] # Data filename from helpers.py
 
 # Get data
 t = np.arange(n_steps)
@@ -64,7 +59,7 @@ if do_norm:
     target -= target_mean.reshape(1, -1, 1)
     target /= target_std.reshape(1, -1, 1)
 
-train_target = target[:n_samples, :n_outputs, :n_steps].reshape(n_samples, n_outputs, n_steps) # x-coordinate of target system
+train_target = target[:n_samples, :n_outputs, :n_steps].reshape(n_samples, n_outputs, n_steps)
 test_target = target[test_sample, :, :teacher_steps].reshape(1, n_outputs, teacher_steps) # Slice off beyond teacher steps
 
 save_rmse = []
@@ -93,7 +88,7 @@ if sweep == 'size':
 
             # Compute error
             target_plot = target[test_sample,:,:teacher_steps + extend].reshape(1, n_outputs, teacher_steps + extend)
-            rmse = np.sqrt(np.mean(np.square(outputs - target_plot), axis=1)).reshape(-1,) 
+            rmse = np.sqrt(np.mean(np.square(outputs - target_plot), axis=1)).reshape(-1,)
             rmse_truncated = rmse[1000:] # Cut off first 10 timesteps
             
             # Find last timestep of accurate prediction

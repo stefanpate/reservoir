@@ -118,7 +118,7 @@ class esn:
 
         Returns:
             - States [n_samples, n_hidden, n_steps]
-            - Outputs [n_samples, n_ouputs, n_steps]
+            - Outputs [n_samples, n_outputs, n_steps]
         '''
         scl_x_init = 10 # Divides normal rand var that inits x
         
